@@ -1,0 +1,30 @@
+{
+    "target_domain": "vietbank.com.vn",
+    "target_description": "Vietbank - Ngân hàng TMCP Việt Nam Thương Tín",
+    "keywords": [
+        "vietbank",
+        "viet-bank",
+        "vjetbank",
+        "ngan-hang-viet-bank",
+        "nganhangvietbank",
+        "nhvietbank"
+    ],
+    "acronyms": [],
+    "blacklist": [],
+    "whitelist": [
+        "vietbank.com.vn",
+        "www.vietbank.com.vn"
+    ],
+    "google_ai": {
+        "model": "gemini-2.5-flash",
+        "batch_size": 150
+    },
+    "reports": {
+        "directory": "reports",
+        "filename_prefix": "domain_report"
+    },
+    "api_keys": {
+        "urlscan": "",
+        "google_ai": ""
+    }
+}

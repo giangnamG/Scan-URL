@@ -1,0 +1,16 @@
+venv/
+.venv/
+env/
+ENV/
+
+__pycache__/
+*.py[cod]
+
+.env
+.env.*
+.vscode/
+
+reports/*
+!reports/.gitkeep
+
+*.xlsx
