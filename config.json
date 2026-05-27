@@ -1,16 +1,15 @@
 {
     "target_domain": "vietbank.com.vn",
     "target_description": "Vietbank - Ngân hàng TMCP Việt Nam Thương Tín",
+    "_comment_keywords": "Danh sách từ khóa chính dùng để query urlscan. Nên là tên thương hiệu, biến thể viết sai, cách viết có dấu gạch ngang hoặc cụm dễ bị giả mạo. Keyword thường được ghép với nhiều pattern như .keyword, -keyword, keyword- để tìm domain nghi vấn.",
     "keywords": [
-        "vietbank",
-        "viet-bank",
-        "vjetbank",
-        "ngan-hang-viet-bank",
-        "nganhangvietbank",
-        "nhvietbank"
+        "vietbank"
     ],
+    "_comment_acronyms": "Danh sách từ viết tắt hoặc alias ngắn của thương hiệu/tổ chức cần tìm. Ví dụ: [\"ghtk\", \"vbb\"]. Acronym chỉ search theo mẫu chính xác hơn để giảm nhiễu.",
     "acronyms": [],
+    "_comment_blacklist": "Danh sách domain/từ khóa cần loại bỏ trước khi gửi sang AI, thường là domain nhiễu hoặc nguồn chắc chắn không liên quan. Có thể nhập domain hoặc URL.",
     "blacklist": [],
+    "_comment_whitelist": "Danh sách domain hợp lệ/chính thức cần bỏ qua khỏi kết quả, ví dụ domain chính và subdomain thật của tổ chức. Domain trong whitelist sẽ không được đưa vào danh sách nghi vấn.",
     "whitelist": [
         "vietbank.com.vn",
         "www.vietbank.com.vn"

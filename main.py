@@ -401,8 +401,12 @@ class GoogleAI_Processor:
         self.model = None
         self.is_configured = False
         self.model_name = model_name or DEFAULT_GOOGLE_AI_MODEL
+        self.last_review_status = "not_started"
+        self.last_error_message = ""
         process_tag = "P2-AI"
         if not api_key or "YOUR_" in api_key:
+            self.last_review_status = "skipped_not_configured"
+            self.last_error_message = "Google AI API key is missing."
             log_message(process_tag, "Google AI API key is missing. AI analysis will be skipped.", "WARN")
             return
         try:
@@ -411,6 +415,8 @@ class GoogleAI_Processor:
             self.is_configured = True
             log_message(process_tag, f"Google AI configured successfully with model '{self.model_name}'.", "SUCCESS") # Sử dụng log_message
         except Exception as e:
+            self.last_review_status = "skipped_not_configured"
+            self.last_error_message = str(e)
             log_message(process_tag, f"Error configuring Google AI: {e}", "ERROR") # Sử dụng log_message
             log_message(process_tag, "AI analysis will be skipped.", "WARN")       # Sử dụng log_message
 
@@ -461,10 +467,16 @@ class GoogleAI_Processor:
     def analyze_domains(self, target_domain, domain_list):
         """Analyzes a list of domain names using the Google AI model."""
         process_tag = "P2-AI" # Tag cho các log bên trong hàm này
+        self.last_review_status = "review_failed"
+        self.last_error_message = ""
         if not self.is_configured or not self.model:
+            self.last_review_status = "skipped_not_configured"
+            self.last_error_message = "AI model unavailable."
             log_message(process_tag, "AI Model unavailable. Skipping analysis.", "WARN")
             return []
-        if not domain_list: return []
+        if not domain_list:
+            self.last_review_status = "skipped_no_input"
+            return []
 
         log_message(process_tag, f"Analyzing batch of {len(domain_list)} domains for target '{target_domain}'...", "INFO")
         domain_list_str = "\n".join(domain_list)
@@ -483,6 +495,8 @@ class GoogleAI_Processor:
 
                 if isinstance(result_data, list):
                      suspicious_domains_list = result_data
+                     self.last_review_status = "reviewed"
+                     self.last_error_message = ""
                      log_message(process_tag, "  ✔️ OK: AI returned a direct list.", "SUCCESS")
                      break
                 elif isinstance(result_data, dict):
@@ -494,6 +508,8 @@ class GoogleAI_Processor:
                     for key in keys_to_check:
                         if key in result_data and isinstance(result_data[key], list):
                             suspicious_domains_list = result_data[key]
+                            self.last_review_status = "reviewed"
+                            self.last_error_message = ""
                             log_message(process_tag, f"  ✔️ Extracted list from '{key}' key.", "SUCCESS")
                             extracted = True; break
                     if not extracted and analysis_key in result_data and isinstance(result_data[analysis_key], list):
@@ -504,19 +520,30 @@ class GoogleAI_Processor:
                                     if d_key in item: temp_list.append(item[d_key]); break
                         if temp_list:
                             suspicious_domains_list = temp_list
+                            self.last_review_status = "reviewed"
+                            self.last_error_message = ""
                             log_message(process_tag, f"  ✔️ Extracted list from items within '{analysis_key}'.", "SUCCESS")
                             extracted = True
                         else: log_message(process_tag, f"  ⚠️ Found '{analysis_key}' but failed to extract domains.", "WARN")
-                    if not extracted: log_message(process_tag, "  ⚠️ Couldn't find/extract list under known structures.", "WARN")
+                    if not extracted:
+                        self.last_review_status = "review_failed"
+                        self.last_error_message = "AI response did not contain an extractable domain list."
+                        log_message(process_tag, "  ⚠️ Couldn't find/extract list under known structures.", "WARN")
                     break
                 else:
+                    self.last_review_status = "review_failed"
+                    self.last_error_message = f"Unexpected AI response type: {type(result_data)}"
                     log_message(process_tag, f"  ⚠️ AI response was not list/dict. Type: {type(result_data)}", "WARN")
                     break
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                self.last_review_status = "review_failed"
+                self.last_error_message = f"JSON decode error: {e}"
                 log_message(process_tag, f"  ❌ Error decoding JSON (Attempt {attempt + 1}).", "ERROR")
                 break
             except Exception as e:
                 error_message = str(e)
+                self.last_review_status = "review_failed"
+                self.last_error_message = error_message
                 log_message(process_tag, f"  ❌ Error calling API (Attempt {attempt + 1}): {error_message[:100]}...", "ERROR")
                 if ("429" in error_message or "Resource has been exhausted" in error_message or
                     "503" in error_message or isinstance(e, requests.exceptions.Timeout)):
@@ -551,26 +578,51 @@ def process_2_ai_analyzer(queue_from_crawler, queue_to_exporter, target_domain_f
                 log_message(process_tag, f"Received batch of {len(details_batch)} item details from Crawler.", "RECEIVE")
                 domain_names_to_analyze = list(set(filter(None, [item.get("Domain") for item in details_batch])))
 
-                if not domain_names_to_analyze:
-                     log_message(process_tag, "  Batch contains no valid domain names to analyze.", "WARN")
-                     continue
-
                 suspicious_names_list = []
-                if ai_processor.is_configured:
+                ai_review_status = "review_failed"
+                ai_review_error = ""
+
+                if not domain_names_to_analyze:
+                     ai_review_status = "skipped_no_domain"
+                     ai_review_error = "Batch contains no valid domain names to analyze."
+                     log_message(process_tag, f"  {ai_review_error}", "WARN")
+                elif ai_processor.is_configured:
                     suspicious_names_list = ai_processor.analyze_domains(target_domain_for_ai, domain_names_to_analyze)
+                    ai_review_status = ai_processor.last_review_status
+                    ai_review_error = ai_processor.last_error_message
                 else:
+                     ai_review_status = "skipped_not_configured"
+                     ai_review_error = ai_processor.last_error_message or "AI processor is not configured."
                      log_message(process_tag, "  Skipping AI analysis (processor not configured).", "INFO")
 
-                if suspicious_names_list:
-                    suspicious_names_set = set(suspicious_names_list)
-                    suspicious_details_to_export = [item for item in details_batch if item.get("Domain") in suspicious_names_set]
-                    if suspicious_details_to_export:
-                        log_message(process_tag, f"  Filtered details. Sending {len(suspicious_details_to_export)} suspicious items to Exporter.", "SEND")
-                        queue_to_exporter.put(suspicious_details_to_export)
+                suspicious_names_set = {
+                    normalize_filter_value(name) for name in suspicious_names_list
+                    if normalize_filter_value(name)
+                }
+                enriched_batch = []
+                suspicious_count = 0
+                for item in details_batch:
+                    enriched_item = item.copy()
+                    domain_key = normalize_filter_value(enriched_item.get("Domain", ""))
+                    is_suspicious = ai_review_status == "reviewed" and domain_key in suspicious_names_set
+                    if is_suspicious:
+                        suspicious_count += 1
+                    enriched_item["AI_Suspicious"] = is_suspicious
+                    enriched_item["AI Review Status"] = ai_review_status
+                    enriched_item["AI Review Error"] = ai_review_error
+                    enriched_item["AI Model"] = ai_processor.model_name
+                    enriched_batch.append(enriched_item)
+
+                if ai_review_status == "reviewed":
+                    if suspicious_count:
+                        log_message(process_tag, f"  AI reviewed batch. Marked {suspicious_count}/{len(enriched_batch)} items suspicious.", "INFO")
                     else:
-                         log_message(process_tag, "  ⚠️ AI names found, but details mismatch (unexpected).", "WARN")
+                        log_message(process_tag, "  AI reviewed batch. No suspicious domains identified.", "INFO")
                 else:
-                    log_message(process_tag, "  ℹ️ No suspicious domains identified/extracted by AI (or analysis skipped) in this batch.", "INFO")
+                    log_message(process_tag, f"  AI did not review this batch ({ai_review_status}). Logging {len(enriched_batch)} items anyway.", "WARN")
+
+                log_message(process_tag, f"  Sending {len(enriched_batch)} logged items to Exporter.", "SEND")
+                queue_to_exporter.put(enriched_batch)
 
             elif isinstance(details_batch, list) and not details_batch:
                  log_message(process_tag, "  Received an empty details batch from Crawler.", "INFO")
@@ -623,15 +675,31 @@ def process_3_exporter(queue_from_ai, output_filename): # Bỏ target_domain
             df_processed = pd.DataFrame(unique_final_details)
 
             # 3. Chuẩn bị dữ liệu cho Sheet 1 ('Raw Data')
-            # Loại bỏ cột Risk Score và AI_Suspicious
-            raw_columns = [col for col in df_processed.columns if col not in ['Risk Score', 'AI_Suspicious']]
-            df_raw = df_processed[raw_columns].copy()
+            df_raw = df_processed.copy()
             # Sắp xếp sheet raw theo Domain nếu muốn
             if 'Domain' in df_raw.columns:
                 log_message(process_tag, "Sorting 'Raw Data' sheet by Domain...", "INFO")
                 df_raw_sorted = df_raw.sort_values(by='Domain', ascending=True, ignore_index=True, kind='stable')
             else:
                 df_raw_sorted = df_raw
+
+            df_ai_suspicious_sorted = pd.DataFrame()
+            if 'AI_Suspicious' in df_raw.columns:
+                df_ai_suspicious = df_raw[df_raw['AI_Suspicious'] == True].copy()
+                if 'Domain' in df_ai_suspicious.columns:
+                    df_ai_suspicious_sorted = df_ai_suspicious.sort_values(by='Domain', ascending=True, ignore_index=True, kind='stable')
+                else:
+                    df_ai_suspicious_sorted = df_ai_suspicious
+                log_message(process_tag, f"Created 'AI Suspicious' DataFrame with {len(df_ai_suspicious_sorted)} items.", "INFO")
+
+            df_ai_unreviewed_sorted = pd.DataFrame()
+            if 'AI Review Status' in df_raw.columns:
+                df_ai_unreviewed = df_raw[df_raw['AI Review Status'].astype(str).str.lower() != 'reviewed'].copy()
+                if 'Domain' in df_ai_unreviewed.columns:
+                    df_ai_unreviewed_sorted = df_ai_unreviewed.sort_values(by='Domain', ascending=True, ignore_index=True, kind='stable')
+                else:
+                    df_ai_unreviewed_sorted = df_ai_unreviewed
+                log_message(process_tag, f"Created 'AI Unreviewed' DataFrame with {len(df_ai_unreviewed_sorted)} items.", "INFO")
 
             # 4. Chuẩn bị dữ liệu cho Sheet 2 ('Non-Cloudflare Server')
             df_non_cloudflare = pd.DataFrame() # Khởi tạo rỗng
@@ -663,6 +731,18 @@ def process_3_exporter(queue_from_ai, output_filename): # Bỏ target_domain
                 # Ghi Sheet 1 ('Raw Data')
                 df_raw_sorted.to_excel(writer, sheet_name='Raw Data', index=False)
                 log_message(process_tag, f"  Sheet 'Raw Data' written ({len(df_raw_sorted)} rows).", "INFO")
+
+                if not df_ai_suspicious_sorted.empty:
+                    df_ai_suspicious_sorted.to_excel(writer, sheet_name='AI Suspicious', index=False)
+                    log_message(process_tag, f"  Sheet 'AI Suspicious' written ({len(df_ai_suspicious_sorted)} rows).", "INFO")
+                else:
+                    log_message(process_tag, "  Sheet 'AI Suspicious' skipped (no suspicious AI results).", "INFO")
+
+                if not df_ai_unreviewed_sorted.empty:
+                    df_ai_unreviewed_sorted.to_excel(writer, sheet_name='AI Unreviewed', index=False)
+                    log_message(process_tag, f"  Sheet 'AI Unreviewed' written ({len(df_ai_unreviewed_sorted)} rows).", "INFO")
+                else:
+                    log_message(process_tag, "  Sheet 'AI Unreviewed' skipped (all logged domains were reviewed by AI).", "INFO")
 
                 # Ghi Sheet 2 ('Non-Cloudflare Server'), chỉ khi có dữ liệu
                 if not df_non_cloudflare_sorted.empty:
